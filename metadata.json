@@ -1,0 +1,7 @@
+{
+  "name": "WinServer 2025 AutoAttend Builder",
+  "description": "Extract dependencies and generate unattended installation scripts for Windows Server 2025 with AI assistance.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
