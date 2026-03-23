@@ -39,10 +39,11 @@ export function AIChat() {
       // Initialize chat session if it doesn't exist
       if (!chatSessionRef.current) {
         chatSessionRef.current = ai.chats.create({
-          model: "gemini-3-flash-preview",
+          model: "gemini-3.1-pro-preview",
           config: {
             systemInstruction: "You are an expert Windows Server 2025 administrator assistant. Help the user with server configurations, PowerShell, and unattended installations.",
             tools: [{ googleSearch: {} }],
+            thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
           }
         });
       }

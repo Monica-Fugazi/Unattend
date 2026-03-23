@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { 
   Play, Loader2, FileText, Volume2, Mic, ChevronRight, ChevronLeft, 
   Download, Server, Shield, Network, Cpu, Settings, HardDrive, 
-  Database, Fingerprint, Terminal, CheckSquare, WifiOff
+  Database, Fingerprint, Terminal, CheckSquare
 } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
+import { getGeminiClient } from "../lib/gemini";
 import { Modality } from "@google/genai";
 import { cn } from "../lib/utils";
 
@@ -17,8 +17,7 @@ const STEPS = [
   { id: "security", title: "Security", icon: Fingerprint, desc: "Auth, Retina, Certs" },
   { id: "firmware", title: "Firmware", icon: Shield, desc: "NVRAM, ROMs, Stealth" },
   { id: "automation", title: "Automation & UI", icon: Terminal, desc: "AI PS, WinUI Shell, DSC" },
-  { id: "generate", title: "Generate", icon: Play, desc: "Build Deployment Package" },
-  { id: "validation", title: "Validation", icon: CheckSquare, desc: "Post-Deployment Checklist" }
+  { id: "generate", title: "Generate", icon: Play, desc: "Build Deployment Package" }
 ];
 
 export function DeploymentWizard() {
@@ -26,8 +25,6 @@ export function DeploymentWizard() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState("");
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
-  const [validationChecklist, setValidationChecklist] = useState<{ id: string; label: string; checked: boolean }[]>([]);
   
   // Advanced Enterprise Wizard State
   const [config, setConfig] = useState({
@@ -75,147 +72,39 @@ export function DeploymentWizard() {
   const handleGenerateExtractionScript = async () => {
     setIsGenerating(true);
     try {
-      if (isOfflineMode) {
-        // Offline fallback
-        const offlineScript = `# Offline Mode: Basic Extraction Script Template
-$ErrorActionPreference = "SilentlyContinue"
-Write-Host "Extracting Windows Server Configuration (Offline Template)..."
+      const ai = getGeminiClient();
+      const prompt = `Write a comprehensive PowerShell script to extract the current Windows Server configuration.
+      It needs to extract:
+      1. All third-party drivers (Export-WindowsDriver)
+      2. Current Windows Features and Roles
+      3. Active Local Users and Groups
+      4. Network Configuration (IP, DNS, Adapters)
+      5. Applied GPOs (gpresult)
+      6. Scheduled Tasks
+      7. Installed Certificates
+      
+      Output ONLY the PowerShell script in a markdown code block.`;
 
-# 1. Drivers
-Export-WindowsDriver -Online -Destination "C:\\Backup\\Drivers"
-
-# 2. Features
-Get-WindowsFeature | Where-Object Installed | Select-Object Name | Export-Csv "C:\\Backup\\Features.csv" -NoTypeInformation
-
-# 3. Users
-Get-LocalUser | Export-Csv "C:\\Backup\\Users.csv" -NoTypeInformation
-
-# 4. Network
-Get-NetAdapter | Export-Csv "C:\\Backup\\Network.csv" -NoTypeInformation
-
-Write-Host "Extraction complete."`;
-        updateConfig("extractionData", offlineScript);
-      } else {
-        const prompt = `Write a comprehensive PowerShell script to extract the current Windows Server configuration.
-        It needs to extract:
-        1. All third-party drivers (Export-WindowsDriver)
-        2. Current Windows Features and Roles
-        3. Active Local Users and Groups
-        4. Network Configuration (IP, DNS, Adapters)
-        5. Applied GPOs (gpresult)
-        6. Scheduled Tasks
-        7. Installed Certificates
-        
-        Output ONLY the PowerShell script in a markdown code block.`;
-
-        const response = await generateContentWithRetry({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-        });
-        
-        updateConfig("extractionData", response.text || "");
-      }
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
+        contents: prompt,
+      });
+      
+      updateConfig("extractionData", response.text || "");
     } catch (error) {
       console.error(error);
-      if (isOfflineMode) {
-        updateConfig("extractionData", "# Error generating offline script.");
-      }
     } finally {
       setIsGenerating(false);
     }
   };
 
-  useEffect(() => {
-    if (!config.extractionData) {
-      handleGenerateExtractionScript();
-    }
-  }, [isOfflineMode]);
-
   const handleFinalGenerate = async () => {
     setIsGenerating(true);
     setResult("");
     
-    // Generate validation checklist based on config
-    const checklist = [
-      { id: "pxe", label: `Verify PXE Boot on ${config.hostOS} host`, checked: false },
-      { id: "storage", label: "Validate NVMe I/O and RAM Disk allocation", checked: false },
-      { id: "security", label: "Confirm Biometric (Retina/Voice) Auth integration", checked: false },
-      { id: "network", label: "Check Network Packet Distribution (Quantum Loping)", checked: false },
-      { id: "firmware", label: "Verify NVRAM and Hardware ACL lockdown", checked: false },
-      { id: "dsc", label: "Validate DSC and AI PowerShell ISE isolation", checked: false },
-      { id: "clock", label: "Confirm Atomic Clock Stratum 1 Sync", checked: false }
-    ];
-    setValidationChecklist(checklist);
-    
     try {
-      if (isOfflineMode) {
-        // Offline fallback template
-        const offlineResult = `# Enterprise Deployment Package (Offline Mode)
-
-> **Note:** This package was generated using local templates because Offline Mode is enabled.
-
-## 1. Cross-Platform PXE & BCD Setup
-**Host OS:** ${config.hostOS}
-**PXE Options:** ${config.pxeOptions}
-**BCD Opts:** ${config.bcdKernelOpt}
-
-\`\`\`bash
-# Local template for PXE setup
-sudo apt-get install dnsmasq
-# Configure dnsmasq.conf for HTTP boot
-\`\`\`
-
-## 2. Advanced Storage Script (Storage.ps1)
-**NVMe I/O:** ${config.nvmeIo}
-**RAM Disk:** ${config.ramDisk}
-
-\`\`\`powershell
-# Storage.ps1 Template
-Write-Host "Configuring Storage..."
-# Apply NVMe optimizations
-# Apply RAM Disk settings
-\`\`\`
-
-## 3. autounattend.xml
-**DriverStore:** ${config.drivers}
-**Network:** ${config.network}
-
-\`\`\`xml
-<!-- Basic autounattend.xml template -->
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
-  <settings pass="windowsPE">
-    <!-- Setup config -->
-  </settings>
-</unattend>
-\`\`\`
-
-## 4. Security & Auth Script (Security.ps1)
-**Users:** ${config.users}
-**Retina Scan:** ${config.retinaScan}
-
-\`\`\`powershell
-# Security.ps1 Template
-Write-Host "Applying Security Policies..."
-\`\`\`
-
-## 5. SetupComplete.cmd & DSC
-**DSC:** ${config.dsc}
-**GPO/Registry:** ${config.gpoRegistry}
-
-\`\`\`cmd
-@echo off
-echo Running SetupComplete...
-\`\`\`
-
-## 6. Enterprise Checklist
-- [ ] Verify PXE Boot
-- [ ] Validate Storage Configuration
-- [ ] Check Security Policies
-- [ ] Confirm DSC Application
-`;
-        setResult(offlineResult);
-      } else {
-        const prompt = `You are an elite Enterprise Windows Server 2025 Architect.
+      const ai = getGeminiClient();
+      const prompt = `You are an elite Enterprise Windows Server 2025 Architect.
 The user wants an extremely advanced, step-by-step deployment package that can be hosted on ANY OS (${config.hostOS}) using a unified API/PXE approach.
 
 Here are the user's advanced requirements:
@@ -274,13 +163,12 @@ Please generate a complete, highly technical deployment guide including:
 
 Use markdown formatting with clear headings and code blocks.`;
 
-        const response = await generateContentWithRetry({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-        });
-        
-        setResult(response.text || "No response generated.");
-      }
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-pro-preview",
+        contents: prompt,
+      });
+      
+      setResult(response.text || "No response generated.");
     } catch (error) {
       console.error("Generation error:", error);
       setResult("An error occurred while generating the deployment package.");
@@ -290,10 +178,11 @@ Use markdown formatting with clear headings and code blocks.`;
   };
 
   const handleTTS = async () => {
-    if (!result || isOfflineMode) return;
+    if (!result) return;
     setIsPlayingTTS(true);
     try {
-      const response = await generateContentWithRetry({
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: "Your advanced Enterprise Windows Server 2025 deployment package is ready. It includes NVMe I/O optimizations, RAM disk core allocation, biometric security configurations, and AI-integrated PowerShell setup. Please review the generated markdown for the complete code." }] }],
         config: {
@@ -321,23 +210,9 @@ Use markdown formatting with clear headings and code blocks.`;
 
   return (
     <div className="h-full flex flex-col p-8 max-w-6xl mx-auto w-full">
-      <div className="mb-8 flex justify-between items-start">
-        <div>
-          <h2 className="text-3xl font-semibold mb-2">Enterprise Deployment Wizard</h2>
-          <p className="text-[#8E9299]">Advanced step-by-step prompted install for Windows Server 2025 with AI, Biometrics, and High-Performance I/O.</p>
-        </div>
-        <button
-          onClick={() => setIsOfflineMode(!isOfflineMode)}
-          className={cn(
-            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border",
-            isOfflineMode 
-              ? "bg-amber-500/20 text-amber-400 border-amber-500/50" 
-              : "bg-[#151619] text-[#8E9299] border-[#2a2b30] hover:text-white"
-          )}
-        >
-          <WifiOff size={16} />
-          {isOfflineMode ? "Offline Mode Active" : "Offline Mode"}
-        </button>
+      <div className="mb-8">
+        <h2 className="text-3xl font-semibold mb-2">Enterprise Deployment Wizard</h2>
+        <p className="text-[#8E9299]">Advanced step-by-step prompted install for Windows Server 2025 with AI, Biometrics, and High-Performance I/O.</p>
       </div>
 
       {/* Stepper */}
@@ -762,49 +637,6 @@ Use markdown formatting with clear headings and code blocks.`;
                   <div className="h-full flex flex-col items-center justify-center text-[#4a4b50] space-y-4">
                     <Server size={48} className="opacity-20" />
                     <p>Click "Build Package" to generate your scripts, XMLs, and instructions.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {/* STEP 9: Validation Checklist */}
-          {currentStep === 8 && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 h-full flex flex-col">
-              <div>
-                <h3 className="text-xl font-medium text-white mb-2">Post-Deployment Validation</h3>
-                <p className="text-[#8E9299] text-sm">Use this checklist to verify the integrity of your deployment. These items were generated based on your specific configuration.</p>
-              </div>
-              
-              <div className="flex-1 bg-[#0d0e12] border border-[#2a2b30] rounded-lg p-6 overflow-y-auto">
-                {validationChecklist.length > 0 ? (
-                  <div className="space-y-4">
-                    {validationChecklist.map((item) => (
-                      <div 
-                        key={item.id} 
-                        className={cn(
-                          "flex items-center gap-4 p-4 rounded-lg border transition-all cursor-pointer",
-                          item.checked 
-                            ? "bg-green-500/10 border-green-500/50 text-green-400" 
-                            : "bg-[#151619] border-[#2a2b30] text-gray-300 hover:border-blue-500/50"
-                        )}
-                        onClick={() => {
-                          setValidationChecklist(prev => prev.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i));
-                        }}
-                      >
-                        <div className={cn(
-                          "w-6 h-6 rounded border-2 flex items-center justify-center transition-colors",
-                          item.checked ? "bg-green-500 border-green-500" : "border-[#4a4b50]"
-                        )}>
-                          {item.checked && <CheckSquare size={14} className="text-white" />}
-                        </div>
-                        <span className="font-medium">{item.label}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-[#4a4b50] space-y-4">
-                    <CheckSquare size={48} className="opacity-20" />
-                    <p>Generate a deployment package first to see your validation checklist.</p>
                   </div>
                 )}
               </div>
