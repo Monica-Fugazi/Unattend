@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Play, Loader2, FileText, Volume2, Mic } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
 import { Modality } from "@google/genai";
 
 export function DependencyBuilder() {
@@ -21,7 +21,6 @@ export function DependencyBuilder() {
     setResult("");
     
     try {
-      const ai = getGeminiClient();
       const prompt = `You are a Windows Server 2025 expert. The user wants to build a seamless unattended installation (autounattend.xml) and extract dependencies to rebuild a server.
       
 User requirements:
@@ -33,7 +32,7 @@ Please provide:
 3. A sample \`autounattend.xml\` snippet that configures these roles during deployment.
 Use markdown formatting.`;
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-3.1-pro-preview",
         contents: prompt,
       });
@@ -51,8 +50,7 @@ Use markdown formatting.`;
     if (!result) return;
     setIsPlayingTTS(true);
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: "Here is your Windows Server 2025 configuration summary. " + result.substring(0, 500) + "... Please read the generated scripts for full details." }] }],
         config: {
@@ -116,8 +114,7 @@ Use markdown formatting.`;
   const transcribeAudio = async (base64Audio: string, mimeType: string) => {
     setIsGenerating(true);
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-3-flash-preview",
         contents: {
           parts: [

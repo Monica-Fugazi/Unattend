@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2, Image as ImageIcon, Video, Download } from "lucide-react";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
 
 export function Visualizer() {
   const [prompt, setPrompt] = useState("");
@@ -17,8 +17,7 @@ export function Visualizer() {
     setImageUrl(null);
 
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: 'gemini-3.1-flash-image-preview',
         contents: {
           parts: [{ text: prompt }],

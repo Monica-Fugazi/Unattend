@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Activity, Loader2, Trash2, Network, Shield, Play, Code, ServerCrash } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
 
 export function ServiceAuditor() {
   const [servicesList, setServicesList] = useState("");
@@ -23,7 +23,6 @@ export function ServiceAuditor() {
     setAssessmentResult("");
     
     try {
-      const ai = getGeminiClient();
       const prompt = `You are an elite Windows Server Administrator and Security Auditor.
 The user has provided a list of background services running on their system.
 Assess these services for uninstallation or disabling to debloat and secure the system.
@@ -37,7 +36,7 @@ ${servicesList}
 3. Warnings for any critical services the user should NOT touch.
 Use markdown formatting.`;
       
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-3.1-pro-preview",
         contents: prompt,
       });
@@ -55,7 +54,6 @@ Use markdown formatting.`;
     setRemoteResult("");
     
     try {
-      const ai = getGeminiClient();
       const prompt = `You are an elite Windows Server Security Architect.
 Generate a PowerShell script to configure Remote Access with the following simple controls:
 
@@ -66,7 +64,7 @@ Generate a PowerShell script to configure Remote Access with the following simpl
 
 Provide a robust PowerShell script that configures the services, firewall rules, and registry keys to enforce these exact states. Include brief comments explaining the changes. Use markdown formatting.`;
       
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-3.1-pro-preview",
         contents: prompt,
       });

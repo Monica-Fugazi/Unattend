@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Loader2, Microchip, Search, Code, Cpu, Terminal, Upload, Image as ImageIcon, Trash2, Shield, Zap, CheckSquare, Square, Server, Database } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
 import { ThinkingLevel } from "@google/genai";
 
 const COMMON_TWEAKS = [
@@ -77,8 +77,7 @@ export function BiosBuilder() {
 
     setIsGeneratingLogo(true);
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: 'gemini-3-pro-image-preview',
         contents: {
           parts: [{ text: logoDescription }],
@@ -116,7 +115,6 @@ export function BiosBuilder() {
     setGroundingUrls([]);
 
     try {
-      const ai = getGeminiClient();
       let promptText = `You are an elite firmware engineer, UEFI architect, and hardware hacker.
 The user wants to build a custom BIOS/UEFI for a unique platform.
 Tagline: "The tip of the tweak."
@@ -180,7 +178,7 @@ Use markdown formatting with clear headings and code blocks.`;
         });
       }
 
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-3.1-pro-preview",
         contents: { parts },
         config: {

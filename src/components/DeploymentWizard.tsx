@@ -5,7 +5,7 @@ import {
   Database, Fingerprint, Terminal, CheckSquare, WifiOff
 } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry } from "../lib/gemini";
 import { Modality } from "@google/genai";
 import { cn } from "../lib/utils";
 
@@ -96,7 +96,6 @@ Get-NetAdapter | Export-Csv "C:\\Backup\\Network.csv" -NoTypeInformation
 Write-Host "Extraction complete."`;
         updateConfig("extractionData", offlineScript);
       } else {
-        const ai = getGeminiClient();
         const prompt = `Write a comprehensive PowerShell script to extract the current Windows Server configuration.
         It needs to extract:
         1. All third-party drivers (Export-WindowsDriver)
@@ -109,7 +108,7 @@ Write-Host "Extraction complete."`;
         
         Output ONLY the PowerShell script in a markdown code block.`;
 
-        const response = await ai.models.generateContent({
+        const response = await generateContentWithRetry({
           model: "gemini-3.1-pro-preview",
           contents: prompt,
         });
@@ -216,7 +215,6 @@ echo Running SetupComplete...
 `;
         setResult(offlineResult);
       } else {
-        const ai = getGeminiClient();
         const prompt = `You are an elite Enterprise Windows Server 2025 Architect.
 The user wants an extremely advanced, step-by-step deployment package that can be hosted on ANY OS (${config.hostOS}) using a unified API/PXE approach.
 
@@ -276,7 +274,7 @@ Please generate a complete, highly technical deployment guide including:
 
 Use markdown formatting with clear headings and code blocks.`;
 
-        const response = await ai.models.generateContent({
+        const response = await generateContentWithRetry({
           model: "gemini-3.1-pro-preview",
           contents: prompt,
         });
@@ -295,8 +293,7 @@ Use markdown formatting with clear headings and code blocks.`;
     if (!result || isOfflineMode) return;
     setIsPlayingTTS(true);
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: "Your advanced Enterprise Windows Server 2025 deployment package is ready. It includes NVMe I/O optimizations, RAM disk core allocation, biometric security configurations, and AI-integrated PowerShell setup. Please review the generated markdown for the complete code." }] }],
         config: {
