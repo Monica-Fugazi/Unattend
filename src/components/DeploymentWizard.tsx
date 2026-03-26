@@ -1,13 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Play, Loader2, FileText, Volume2, Mic, ChevronRight, ChevronLeft, 
   Download, Server, Shield, Network, Cpu, Settings, HardDrive, 
-  Database, Fingerprint, Terminal, CheckSquare
+  Database, Fingerprint, Terminal, CheckSquare, WifiOff, Save, FolderOpen, RefreshCw, Trash2, Info
 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { generateContentWithRetry } from "../lib/gemini";
 import { Modality } from "@google/genai";
 import { cn } from "../lib/utils";
+import { useAuth } from "./AuthProvider";
+import { db } from "../firebase";
+import { 
+  collection, addDoc, getDocs, query, where, 
+  serverTimestamp, deleteDoc, doc, updateDoc,
+  orderBy
+} from "firebase/firestore";
+import { handleFirestoreError, OperationType } from "../lib/firebase-utils";
 
 const STEPS = [
   { id: "extract", title: "Current Setup", icon: HardDrive, desc: "Extract existing server config" },
@@ -17,14 +26,93 @@ const STEPS = [
   { id: "security", title: "Security", icon: Fingerprint, desc: "Auth, Retina, Certs" },
   { id: "firmware", title: "Firmware", icon: Shield, desc: "NVRAM, ROMs, Stealth" },
   { id: "automation", title: "Automation & UI", icon: Terminal, desc: "AI PS, WinUI Shell, DSC" },
-  { id: "generate", title: "Generate", icon: Play, desc: "Build Deployment Package" }
+  { id: "generate", title: "Generate", icon: Play, desc: "Build Deployment Package" },
+  { id: "validation", title: "Validation", icon: CheckSquare, desc: "Post-Deployment Checklist" }
 ];
 
 export function DeploymentWizard() {
+  const { user } = useAuth();
+  const [savedConfigs, setSavedConfigs] = useState<any[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
+  const [newConfigName, setNewConfigName] = useState("");
+  const [showSaveModal, setShowSaveModal] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      fetchSavedConfigs();
+    }
+  }, [user]);
+
+  const fetchSavedConfigs = async () => {
+    if (!user) return;
+    setIsLoadingConfigs(true);
+    try {
+      const q = query(
+        collection(db, "deployments"),
+        where("uid", "==", user.uid),
+        orderBy("updatedAt", "desc")
+      );
+      const querySnapshot = await getDocs(q);
+      const configs = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSavedConfigs(configs);
+    } catch (error) {
+      console.error("Error fetching configs:", error);
+    } finally {
+      setIsLoadingConfigs(false);
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    if (!user || !newConfigName.trim()) return;
+    setIsSaving(true);
+    const configData = JSON.stringify(config);
+
+    try {
+      await addDoc(collection(db, "deployments"), {
+        uid: user.uid,
+        name: newConfigName,
+        configData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      setNewConfigName("");
+      setShowSaveModal(false);
+      fetchSavedConfigs();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, "deployments");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLoadConfig = (savedConfig: any) => {
+    try {
+      const data = JSON.parse(savedConfig.configData);
+      setConfig(data);
+    } catch (error) {
+      console.error("Error loading config:", error);
+    }
+  };
+
+  const handleDeleteConfig = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "deployments", id));
+      fetchSavedConfigs();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `deployments/${id}`);
+    }
+  };
+
   const [currentStep, setCurrentStep] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [result, setResult] = useState("");
   const [isPlayingTTS, setIsPlayingTTS] = useState(false);
+  const [isOfflineMode, setIsOfflineMode] = useState(false);
+  const [validationChecklist, setValidationChecklist] = useState<{ id: string; label: string; checked: boolean }[]>([]);
   
   // Advanced Enterprise Wizard State
   const [config, setConfig] = useState({
@@ -72,39 +160,147 @@ export function DeploymentWizard() {
   const handleGenerateExtractionScript = async () => {
     setIsGenerating(true);
     try {
-      const ai = getGeminiClient();
-      const prompt = `Write a comprehensive PowerShell script to extract the current Windows Server configuration.
-      It needs to extract:
-      1. All third-party drivers (Export-WindowsDriver)
-      2. Current Windows Features and Roles
-      3. Active Local Users and Groups
-      4. Network Configuration (IP, DNS, Adapters)
-      5. Applied GPOs (gpresult)
-      6. Scheduled Tasks
-      7. Installed Certificates
-      
-      Output ONLY the PowerShell script in a markdown code block.`;
+      if (isOfflineMode) {
+        // Offline fallback
+        const offlineScript = `# Offline Mode: Basic Extraction Script Template
+$ErrorActionPreference = "SilentlyContinue"
+Write-Host "Extracting Windows Server Configuration (Offline Template)..."
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: prompt,
-      });
-      
-      updateConfig("extractionData", response.text || "");
+# 1. Drivers
+Export-WindowsDriver -Online -Destination "C:\\Backup\\Drivers"
+
+# 2. Features
+Get-WindowsFeature | Where-Object Installed | Select-Object Name | Export-Csv "C:\\Backup\\Features.csv" -NoTypeInformation
+
+# 3. Users
+Get-LocalUser | Export-Csv "C:\\Backup\\Users.csv" -NoTypeInformation
+
+# 4. Network
+Get-NetAdapter | Export-Csv "C:\\Backup\\Network.csv" -NoTypeInformation
+
+Write-Host "Extraction complete."`;
+        updateConfig("extractionData", offlineScript);
+      } else {
+        const prompt = `Write a comprehensive PowerShell script to extract the current Windows Server configuration.
+        It needs to extract:
+        1. All third-party drivers (Export-WindowsDriver)
+        2. Current Windows Features and Roles
+        3. Active Local Users and Groups
+        4. Network Configuration (IP, DNS, Adapters)
+        5. Applied GPOs (gpresult)
+        6. Scheduled Tasks
+        7. Installed Certificates
+        
+        Output ONLY the PowerShell script in a markdown code block.`;
+
+        const response = await generateContentWithRetry({
+          model: "gemini-3.1-pro-preview",
+          contents: prompt,
+        });
+        
+        updateConfig("extractionData", response.text || "");
+      }
     } catch (error) {
       console.error(error);
+      if (isOfflineMode) {
+        updateConfig("extractionData", "# Error generating offline script.");
+      }
     } finally {
       setIsGenerating(false);
     }
   };
 
+  useEffect(() => {
+    if (!config.extractionData) {
+      handleGenerateExtractionScript();
+    }
+  }, [isOfflineMode]);
+
   const handleFinalGenerate = async () => {
     setIsGenerating(true);
     setResult("");
     
+    // Generate validation checklist based on config
+    const checklist = [
+      { id: "pxe", label: `Verify PXE Boot on ${config.hostOS} host`, checked: false },
+      { id: "storage", label: "Validate NVMe I/O and RAM Disk allocation", checked: false },
+      { id: "security", label: "Confirm Biometric (Retina/Voice) Auth integration", checked: false },
+      { id: "network", label: "Check Network Packet Distribution (Quantum Loping)", checked: false },
+      { id: "firmware", label: "Verify NVRAM and Hardware ACL lockdown", checked: false },
+      { id: "dsc", label: "Validate DSC and AI PowerShell ISE isolation", checked: false },
+      { id: "clock", label: "Confirm Atomic Clock Stratum 1 Sync", checked: false }
+    ];
+    setValidationChecklist(checklist);
+    
     try {
-      const ai = getGeminiClient();
-      const prompt = `You are an elite Enterprise Windows Server 2025 Architect.
+      if (isOfflineMode) {
+        // Offline fallback template
+        const offlineResult = `# Enterprise Deployment Package (Offline Mode)
+
+> **Note:** This package was generated using local templates because Offline Mode is enabled.
+
+## 1. Cross-Platform PXE & BCD Setup
+**Host OS:** ${config.hostOS}
+**PXE Options:** ${config.pxeOptions}
+**BCD Opts:** ${config.bcdKernelOpt}
+
+\`\`\`bash
+# Local template for PXE setup
+sudo apt-get install dnsmasq
+# Configure dnsmasq.conf for HTTP boot
+\`\`\`
+
+## 2. Advanced Storage Script (Storage.ps1)
+**NVMe I/O:** ${config.nvmeIo}
+**RAM Disk:** ${config.ramDisk}
+
+\`\`\`powershell
+# Storage.ps1 Template
+Write-Host "Configuring Storage..."
+# Apply NVMe optimizations
+# Apply RAM Disk settings
+\`\`\`
+
+## 3. autounattend.xml
+**DriverStore:** ${config.drivers}
+**Network:** ${config.network}
+
+\`\`\`xml
+<!-- Basic autounattend.xml template -->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+  <settings pass="windowsPE">
+    <!-- Setup config -->
+  </settings>
+</unattend>
+\`\`\`
+
+## 4. Security & Auth Script (Security.ps1)
+**Users:** ${config.users}
+**Retina Scan:** ${config.retinaScan}
+
+\`\`\`powershell
+# Security.ps1 Template
+Write-Host "Applying Security Policies..."
+\`\`\`
+
+## 5. SetupComplete.cmd & DSC
+**DSC:** ${config.dsc}
+**GPO/Registry:** ${config.gpoRegistry}
+
+\`\`\`cmd
+@echo off
+echo Running SetupComplete...
+\`\`\`
+
+## 6. Enterprise Checklist
+- [ ] Verify PXE Boot
+- [ ] Validate Storage Configuration
+- [ ] Check Security Policies
+- [ ] Confirm DSC Application
+`;
+        setResult(offlineResult);
+      } else {
+        const prompt = `You are an elite Enterprise Windows Server 2025 Architect.
 The user wants an extremely advanced, step-by-step deployment package that can be hosted on ANY OS (${config.hostOS}) using a unified API/PXE approach.
 
 Here are the user's advanced requirements:
@@ -163,12 +359,13 @@ Please generate a complete, highly technical deployment guide including:
 
 Use markdown formatting with clear headings and code blocks.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: prompt,
-      });
-      
-      setResult(response.text || "No response generated.");
+        const response = await generateContentWithRetry({
+          model: "gemini-3.1-pro-preview",
+          contents: prompt,
+        });
+        
+        setResult(response.text || "No response generated.");
+      }
     } catch (error) {
       console.error("Generation error:", error);
       setResult("An error occurred while generating the deployment package.");
@@ -178,11 +375,10 @@ Use markdown formatting with clear headings and code blocks.`;
   };
 
   const handleTTS = async () => {
-    if (!result) return;
+    if (!result || isOfflineMode) return;
     setIsPlayingTTS(true);
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: "gemini-2.5-flash-preview-tts",
         contents: [{ parts: [{ text: "Your advanced Enterprise Windows Server 2025 deployment package is ready. It includes NVMe I/O optimizations, RAM disk core allocation, biometric security configurations, and AI-integrated PowerShell setup. Please review the generated markdown for the complete code." }] }],
         config: {
@@ -210,10 +406,135 @@ Use markdown formatting with clear headings and code blocks.`;
 
   return (
     <div className="h-full flex flex-col p-8 max-w-6xl mx-auto w-full">
-      <div className="mb-8">
-        <h2 className="text-3xl font-semibold mb-2">Enterprise Deployment Wizard</h2>
-        <p className="text-[#8E9299]">Advanced step-by-step prompted install for Windows Server 2025 with AI, Biometrics, and High-Performance I/O.</p>
+      <div className="mb-8 flex justify-between items-start">
+        <div>
+          <h2 className="text-3xl font-semibold mb-2">Enterprise Deployment Wizard</h2>
+          <p className="text-[#8E9299]">Advanced step-by-step prompted install for Windows Server 2025 with AI, Biometrics, and High-Performance I/O.</p>
+        </div>
+
+        {/* Save/Load Controls */}
+        <div className="flex flex-wrap gap-4">
+          <button
+            onClick={() => setShowSaveModal(true)}
+            disabled={!user}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors text-sm font-medium"
+          >
+            <Save className="w-4 h-4" />
+            Save Configuration
+          </button>
+          
+          {!user && (
+            <p className="text-xs text-yellow-500 flex items-center gap-2 max-w-[150px]">
+              <Info className="w-4 h-4 shrink-0" />
+              Sign in to save configurations
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={() => setIsOfflineMode(!isOfflineMode)}
+          className={cn(
+            "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border",
+            isOfflineMode 
+              ? "bg-amber-500/20 text-amber-400 border-amber-500/50" 
+              : "bg-[#151619] text-[#8E9299] border-[#2a2b30] hover:text-white"
+          )}
+        >
+          <WifiOff size={16} />
+          {isOfflineMode ? "Offline Mode Active" : "Offline Mode"}
+        </button>
       </div>
+
+      {/* Saved Configs List */}
+      {user && savedConfigs.length > 0 && (
+        <div className="mb-8 p-4 bg-[#151619] border border-[#2a2b30] rounded-xl">
+          <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+            <FolderOpen className="w-5 h-5 text-blue-400" />
+            Saved Deployment Configurations
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {savedConfigs.map((savedConfig) => (
+              <div 
+                key={savedConfig.id}
+                className="p-3 bg-[#0d0e12] border border-[#2a2b30] rounded-lg flex items-center justify-between group"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium truncate text-sm">{savedConfig.name}</p>
+                  <p className="text-[10px] text-gray-500">
+                    {savedConfig.updatedAt?.toDate().toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleLoadConfig(savedConfig)}
+                    className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded transition-colors"
+                    title="Load"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteConfig(savedConfig.id)}
+                    className="p-1.5 hover:bg-red-500/20 text-red-400 rounded transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save Modal */}
+      <AnimatePresence>
+        {showSaveModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-[#151619] border border-[#2a2b30] rounded-2xl p-6 shadow-2xl"
+            >
+              <h3 className="text-xl font-bold mb-4">Save Deployment Configuration</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">
+                    Configuration Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newConfigName}
+                    onChange={(e) => setNewConfigName(e.target.value)}
+                    placeholder="e.g., Enterprise Server v2"
+                    className="w-full bg-[#0d0e12] border border-[#2a2b30] rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
+                  />
+                </div>
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    onClick={() => setShowSaveModal(false)}
+                    className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={isSaving || !newConfigName.trim()}
+                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/50 rounded-lg font-medium transition-colors flex items-center gap-2 text-white"
+                  >
+                    {isSaving ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Save className="w-4 h-4" />
+                    )}
+                    Save
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Stepper */}
       <div className="flex items-center justify-between mb-8 relative">
@@ -637,6 +958,49 @@ Use markdown formatting with clear headings and code blocks.`;
                   <div className="h-full flex flex-col items-center justify-center text-[#4a4b50] space-y-4">
                     <Server size={48} className="opacity-20" />
                     <p>Click "Build Package" to generate your scripts, XMLs, and instructions.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {/* STEP 9: Validation Checklist */}
+          {currentStep === 8 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 h-full flex flex-col">
+              <div>
+                <h3 className="text-xl font-medium text-white mb-2">Post-Deployment Validation</h3>
+                <p className="text-[#8E9299] text-sm">Use this checklist to verify the integrity of your deployment. These items were generated based on your specific configuration.</p>
+              </div>
+              
+              <div className="flex-1 bg-[#0d0e12] border border-[#2a2b30] rounded-lg p-6 overflow-y-auto">
+                {validationChecklist.length > 0 ? (
+                  <div className="space-y-4">
+                    {validationChecklist.map((item) => (
+                      <div 
+                        key={item.id} 
+                        className={cn(
+                          "flex items-center gap-4 p-4 rounded-lg border transition-all cursor-pointer",
+                          item.checked 
+                            ? "bg-green-500/10 border-green-500/50 text-green-400" 
+                            : "bg-[#151619] border-[#2a2b30] text-gray-300 hover:border-blue-500/50"
+                        )}
+                        onClick={() => {
+                          setValidationChecklist(prev => prev.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i));
+                        }}
+                      >
+                        <div className={cn(
+                          "w-6 h-6 rounded border-2 flex items-center justify-center transition-colors",
+                          item.checked ? "bg-green-500 border-green-500" : "border-[#4a4b50]"
+                        )}>
+                          {item.checked && <CheckSquare size={14} className="text-white" />}
+                        </div>
+                        <span className="font-medium">{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-[#4a4b50] space-y-4">
+                    <CheckSquare size={48} className="opacity-20" />
+                    <p>Generate a deployment package first to see your validation checklist.</p>
                   </div>
                 )}
               </div>

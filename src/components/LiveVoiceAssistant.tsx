@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Mic, MicOff, Loader2, Activity } from "lucide-react";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, withRetry } from "../lib/gemini";
 import { Modality, LiveServerMessage } from "@google/genai";
 
 export function LiveVoiceAssistant() {
@@ -43,7 +43,7 @@ export function LiveVoiceAssistant() {
       processor.connect(audioCtx.destination);
 
       // Connect to Live API
-      const sessionPromise = ai.live.connect({
+      const sessionPromise = withRetry(() => ai.live.connect({
         model: "gemini-2.5-flash-native-audio-preview-12-2025",
         config: {
           responseModalities: [Modality.AUDIO],
@@ -126,7 +126,7 @@ export function LiveVoiceAssistant() {
             stopSession();
           }
         }
-      });
+      }));
 
       sessionRef.current = sessionPromise;
 

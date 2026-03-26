@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2, Image as ImageIcon, Video, Download } from "lucide-react";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, generateContentWithRetry, withRetry } from "../lib/gemini";
 
 export function Visualizer() {
   const [prompt, setPrompt] = useState("");
@@ -17,8 +17,7 @@ export function Visualizer() {
     setImageUrl(null);
 
     try {
-      const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
+      const response = await generateContentWithRetry({
         model: 'gemini-3.1-flash-image-preview',
         contents: {
           parts: [{ text: prompt }],
@@ -54,7 +53,7 @@ export function Visualizer() {
 
     try {
       const ai = getGeminiClient();
-      let operation = await ai.models.generateVideos({
+      let operation = await withRetry(() => ai.models.generateVideos({
         model: 'veo-3.1-fast-generate-preview',
         prompt: prompt,
         config: {
@@ -62,11 +61,11 @@ export function Visualizer() {
           resolution: '720p',
           aspectRatio: '16:9'
         }
-      });
+      }));
 
       while (!operation.done) {
         await new Promise(resolve => setTimeout(resolve, 10000));
-        operation = await ai.operations.getVideosOperation({operation: operation});
+        operation = await withRetry(() => ai.operations.getVideosOperation({operation: operation}));
       }
 
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;

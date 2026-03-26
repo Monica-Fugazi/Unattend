@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Bot, User, Search } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient } from "../lib/gemini";
+import { getGeminiClient, withRetry } from "../lib/gemini";
 import { GenerateContentResponse, ThinkingLevel } from "@google/genai";
 
 interface Message {
@@ -39,16 +39,15 @@ export function AIChat() {
       // Initialize chat session if it doesn't exist
       if (!chatSessionRef.current) {
         chatSessionRef.current = ai.chats.create({
-          model: "gemini-3.1-pro-preview",
+          model: "gemini-3-flash-preview",
           config: {
             systemInstruction: "You are an expert Windows Server 2025 administrator assistant. Help the user with server configurations, PowerShell, and unattended installations.",
             tools: [{ googleSearch: {} }],
-            thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
           }
         });
       }
 
-      const response: GenerateContentResponse = await chatSessionRef.current.sendMessage({ message: userMsg });
+      const response: GenerateContentResponse = await withRetry(() => chatSessionRef.current.sendMessage({ message: userMsg }));
       
       // Extract grounding URLs if available
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
