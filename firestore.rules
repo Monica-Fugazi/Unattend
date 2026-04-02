@@ -124,14 +124,14 @@ service cloud.firestore {
       allow read: if isDocOwner();
       allow create: if isAuthenticated() && isValidConfig() && uidUnchanged();
       allow update: if isDocOwner() && isValidConfig() && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'createdAt']);
-      allow delete: if isDocOwner();
+      allow delete: if resource == null || isDocOwner();
     }
 
     match /biosConfigs/{biosConfigId} {
       allow read: if isDocOwner();
       allow create: if isAuthenticated() && isValidConfig() && uidUnchanged();
       allow update: if isDocOwner() && isValidConfig() && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'createdAt']);
-      allow delete: if isDocOwner();
+      allow delete: if resource == null || isDocOwner();
     }
   }
 }
