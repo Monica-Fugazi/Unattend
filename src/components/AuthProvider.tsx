@@ -2,7 +2,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { handleFirestoreError, OperationType } from '../lib/firebase-utils';
 
 interface AuthContextType {
   user: User | null;
@@ -23,19 +22,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (currentUser) {
         // Ensure user document exists in Firestore
         const userRef = doc(db, 'users', currentUser.uid);
-        try {
-          const userSnap = await getDoc(userRef);
-          if (!userSnap.exists()) {
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          try {
             await setDoc(userRef, {
               uid: currentUser.uid,
-              email: currentUser.email || '',
+              email: currentUser.email,
               displayName: currentUser.displayName || '',
               photoURL: currentUser.photoURL || '',
               createdAt: serverTimestamp()
             });
+          } catch (error) {
+            console.error('Error creating user document:', error);
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
         }
       }
       setLoading(false);

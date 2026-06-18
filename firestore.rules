@@ -93,9 +93,9 @@ service cloud.firestore {
       return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'createdAt']) &&
              hasRequiredFields(['uid', 'email', 'createdAt']) &&
              request.resource.data.uid is string && request.resource.data.uid == request.auth.uid &&
-             request.resource.data.email is string && request.resource.data.email.size() < 100 &&
-             isValidOptionalString('displayName', 0, 200) &&
-             isValidOptionalString('photoURL', 0, 2000) &&
+             request.resource.data.email is string && request.resource.data.email.size() > 0 && request.resource.data.email.size() < 100 &&
+             isValidOptionalString('displayName', 0, 100) &&
+             isValidOptionalString('photoURL', 0, 500) &&
              request.resource.data.createdAt is timestamp;
     }
 
@@ -124,14 +124,14 @@ service cloud.firestore {
       allow read: if isDocOwner();
       allow create: if isAuthenticated() && isValidConfig() && uidUnchanged();
       allow update: if isDocOwner() && isValidConfig() && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'createdAt']);
-      allow delete: if resource == null || isDocOwner();
+      allow delete: if isDocOwner();
     }
 
     match /biosConfigs/{biosConfigId} {
       allow read: if isDocOwner();
       allow create: if isAuthenticated() && isValidConfig() && uidUnchanged();
       allow update: if isDocOwner() && isValidConfig() && uidNotModified() && areImmutableFieldsUnchanged(['uid', 'createdAt']);
-      allow delete: if resource == null || isDocOwner();
+      allow delete: if isDocOwner();
     }
   }
 }

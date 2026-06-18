@@ -1,23 +1,8 @@
-import React, { useState, useEffect } from "react";
-import { 
-  Loader2, Microchip, Search, Code, Cpu, Terminal, Upload, 
-  Image as ImageIcon, Trash2, Shield, Zap, CheckSquare, 
-  Square, Server, Database, Save, FolderOpen, RefreshCw,
-  Plus, X, Info, ChevronRight, ChevronDown, Check, AlertTriangle,
-  Download, Globe, Lock, Settings
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
+import { useState } from "react";
+import { Loader2, Microchip, Search, Code, Cpu, Terminal, Upload, Image as ImageIcon, Trash2, Shield, Zap, CheckSquare, Square, Server, Database } from "lucide-react";
 import Markdown from "react-markdown";
-import { generateContentWithRetry } from "../lib/gemini";
+import { getGeminiClient } from "../lib/gemini";
 import { ThinkingLevel } from "@google/genai";
-import { useAuth } from "./AuthProvider";
-import { db } from "../firebase";
-import { 
-  collection, addDoc, getDocs, query, where, 
-  serverTimestamp, deleteDoc, doc, updateDoc,
-  orderBy
-} from "firebase/firestore";
-import { handleFirestoreError, OperationType } from "../lib/firebase-utils";
 
 const COMMON_TWEAKS = [
   "Unlock hidden NVRAM menus",
@@ -31,109 +16,6 @@ const COMMON_TWEAKS = [
 ];
 
 export function BiosBuilder() {
-  const { user } = useAuth();
-  const [savedConfigs, setSavedConfigs] = useState<any[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isLoadingConfigs, setIsLoadingConfigs] = useState(false);
-  const [newConfigName, setNewConfigName] = useState("");
-  const [showSaveModal, setShowSaveModal] = useState(false);
-
-  useEffect(() => {
-    if (user) {
-      fetchSavedConfigs();
-    }
-  }, [user]);
-
-  const fetchSavedConfigs = async () => {
-    if (!user) return;
-    setIsLoadingConfigs(true);
-    try {
-      const q = query(
-        collection(db, "biosConfigs"),
-        where("uid", "==", user.uid),
-        orderBy("updatedAt", "desc")
-      );
-      const querySnapshot = await getDocs(q);
-      const configs = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setSavedConfigs(configs);
-    } catch (error) {
-      console.error("Error fetching configs:", error);
-    } finally {
-      setIsLoadingConfigs(false);
-    }
-  };
-
-  const handleSaveConfig = async () => {
-    if (!user || !newConfigName.trim()) return;
-    setIsSaving(true);
-    const configData = JSON.stringify({
-      platform, selectedTweaks, customTweaks, secureBoot, tpmIntegration,
-      fwAccessControl, igpuQuantum, qbitCount, igpuCompression,
-      quantumEntropyCompression, igpuEncryption, nestedCpu, nestedGpu,
-      nestedNetwork, nestedStealth, nestedBenefits, nvramAccessLevel,
-      nvramBackupMode, nvramVariables, logoDescription, logoData, logoSize
-    });
-
-    try {
-      await addDoc(collection(db, "biosConfigs"), {
-        uid: user.uid,
-        name: newConfigName,
-        configData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      setNewConfigName("");
-      setShowSaveModal(false);
-      fetchSavedConfigs();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, "biosConfigs");
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleLoadConfig = (config: any) => {
-    try {
-      const data = JSON.parse(config.configData);
-      setPlatform(data.platform || "");
-      setSelectedTweaks(data.selectedTweaks || []);
-      setCustomTweaks(data.customTweaks || "");
-      setSecureBoot(data.secureBoot || "");
-      setTpmIntegration(data.tpmIntegration || "");
-      setFwAccessControl(data.fwAccessControl || "");
-      setIgpuQuantum(data.igpuQuantum || "");
-      setQbitCount(data.qbitCount || "");
-      setIgpuCompression(data.igpuCompression || "");
-      setQuantumEntropyCompression(data.quantumEntropyCompression || false);
-      setIgpuEncryption(data.igpuEncryption || "");
-      setNestedCpu(data.nestedCpu || "");
-      setNestedGpu(data.nestedGpu || "");
-      setNestedNetwork(data.nestedNetwork || "");
-      setNestedStealth(data.nestedStealth || "");
-      setNestedBenefits(data.nestedBenefits || "");
-      setNvramAccessLevel(data.nvramAccessLevel || "");
-      setNvramBackupMode(data.nvramBackupMode || "");
-      setNvramVariables(data.nvramVariables || []);
-      setLogoDescription(data.logoDescription || "");
-      setLogoData(data.logoData || null);
-      setLogoSize(data.logoSize || "1K");
-    } catch (error) {
-      console.error("Error loading config:", error);
-    }
-  };
-
-  const handleDeleteConfig = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, "biosConfigs", id));
-      fetchSavedConfigs();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `biosConfigs/${id}`);
-    }
-  };
-
   const [platform, setPlatform] = useState("");
   const [selectedTweaks, setSelectedTweaks] = useState<string[]>([]);
   const [customTweaks, setCustomTweaks] = useState("");
@@ -195,7 +77,8 @@ export function BiosBuilder() {
 
     setIsGeneratingLogo(true);
     try {
-      const response = await generateContentWithRetry({
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
         model: 'gemini-3-pro-image-preview',
         contents: {
           parts: [{ text: logoDescription }],
@@ -233,6 +116,7 @@ export function BiosBuilder() {
     setGroundingUrls([]);
 
     try {
+      const ai = getGeminiClient();
       let promptText = `You are an elite firmware engineer, UEFI architect, and hardware hacker.
 The user wants to build a custom BIOS/UEFI for a unique platform.
 Tagline: "The tip of the tweak."
@@ -296,7 +180,7 @@ Use markdown formatting with clear headings and code blocks.`;
         });
       }
 
-      const response = await generateContentWithRetry({
+      const response = await ai.models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: { parts },
         config: {
@@ -332,116 +216,6 @@ Use markdown formatting with clear headings and code blocks.`;
         </h2>
         <p className="text-[#8E9299] italic">"The tip of the tweak." — AI-assisted BIOS building for unique platforms with Google IDE reference support.</p>
       </div>
-
-      {/* Save/Load Controls */}
-      <div className="flex flex-wrap gap-4 mb-8">
-        <button
-          onClick={() => setShowSaveModal(true)}
-          disabled={!user}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-        >
-          <Save className="w-4 h-4" />
-          Save Configuration
-        </button>
-        
-        {!user && (
-          <p className="text-sm text-yellow-500 flex items-center gap-2">
-            <Info className="w-4 h-4" />
-            Sign in to save your configurations
-          </p>
-        )}
-      </div>
-
-      {/* Saved Configs List */}
-      {user && savedConfigs.length > 0 && (
-        <div className="mb-8 p-4 bg-[#151619] border border-[#2a2b30] rounded-xl">
-          <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
-            <FolderOpen className="w-5 h-5 text-blue-400" />
-            Saved BIOS Configurations
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {savedConfigs.map((config) => (
-              <div 
-                key={config.id}
-                className="p-3 bg-[#0d0e12] border border-[#2a2b30] rounded-lg flex items-center justify-between group"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium truncate">{config.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {config.updatedAt?.toDate().toLocaleDateString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleLoadConfig(config)}
-                    className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded transition-colors"
-                    title="Load"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDeleteConfig(config.id)}
-                    className="p-1.5 hover:bg-red-500/20 text-red-400 rounded transition-colors"
-                    title="Delete"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Save Modal */}
-      <AnimatePresence>
-        {showSaveModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md bg-[#151619] border border-[#2a2b30] rounded-2xl p-6 shadow-2xl"
-            >
-              <h3 className="text-xl font-bold mb-4">Save Configuration</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-1">
-                    Configuration Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newConfigName}
-                    onChange={(e) => setNewConfigName(e.target.value)}
-                    placeholder="e.g., Gaming Optimized v1"
-                    className="w-full bg-[#0d0e12] border border-[#2a2b30] rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-white"
-                  />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    onClick={() => setShowSaveModal(false)}
-                    className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleSaveConfig}
-                    disabled={isSaving || !newConfigName.trim()}
-                    className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/50 rounded-lg font-medium transition-colors flex items-center gap-2 text-white"
-                  >
-                    {isSaving ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Save className="w-4 h-4" />
-                    )}
-                    Save
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden">
         {/* Input Panel */}

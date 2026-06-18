@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Bot, User, Search } from "lucide-react";
 import Markdown from "react-markdown";
-import { getGeminiClient, withRetry } from "../lib/gemini";
+import { getGeminiClient } from "../lib/gemini";
 import { GenerateContentResponse, ThinkingLevel } from "@google/genai";
 
 interface Message {
@@ -47,7 +47,7 @@ export function AIChat() {
         });
       }
 
-      const response: GenerateContentResponse = await withRetry(() => chatSessionRef.current.sendMessage({ message: userMsg }));
+      const response: GenerateContentResponse = await chatSessionRef.current.sendMessage({ message: userMsg });
       
       // Extract grounding URLs if available
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
